@@ -52,6 +52,14 @@ Script: `cc12m_tokenize_pyramid_residual_3lvl.py`
 
 Script: `cc12m_tokenize_pyramid_residual_4lvl.py`
 
+#### 5-level (8→16→32→64→128)
+
+A high-detail variant that models up to 128×128 (then upsample to 256 for display).
+
+- total: **65472 tokens/image**
+
+Script: `cc12m_tokenize_pyramid_residual_5lvl.py`
+
 #### 6-level (4→8→16→32→64→128)
 
 A practical 6-level variant that ends at 128×128 to keep sizes manageable.

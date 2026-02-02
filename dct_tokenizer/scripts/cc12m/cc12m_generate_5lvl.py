@@ -51,6 +51,15 @@ def sample_from_ntd(result_by_token_id: dict, temperature: float = 1.0, top_k: i
 
 
 def generate_tokens(engine, num_tokens: int, temperature: float, top_k: int, max_context: int) -> np.ndarray:
+    """Generate a token sequence.
+
+    IMPORTANT: Fastgram's `ntd()` already performs Infini-gram style backoff and
+    returns `suffix_len`. So we should call it **once per step** with the
+    longest context we want (truncated to `max_context`).
+
+    The earlier manual backoff loop would multiply runtime by ~max_context.
+    """
+
     r = engine.ntd([], max_support=max(1000, top_k))
     first = sample_from_ntd(r.get("result_by_token_id", {}), temperature=temperature, top_k=top_k)
     if first is None:
@@ -58,16 +67,13 @@ def generate_tokens(engine, num_tokens: int, temperature: float, top_k: int, max
 
     seq: List[int] = [first]
     while len(seq) < num_tokens:
-        nxt = None
-        for ctx_len in range(min(max_context, len(seq)), 0, -1):
-            ctx = seq[-ctx_len:]
-            r = engine.ntd(ctx, max_support=max(1000, top_k))
-            nxt = sample_from_ntd(r.get("result_by_token_id", {}), temperature=temperature, top_k=top_k)
-            if nxt is not None:
-                break
+        ctx = seq[-max_context:] if max_context > 0 else []
+        r = engine.ntd(ctx, max_support=max(1000, top_k))
+        nxt = sample_from_ntd(r.get("result_by_token_id", {}), temperature=temperature, top_k=top_k)
         if nxt is None:
-            r = engine.ntd([], max_support=max(1000, top_k))
-            nxt = sample_from_ntd(r.get("result_by_token_id", {}), temperature=temperature, top_k=top_k)
+            # fallback to unigram
+            r0 = engine.ntd([], max_support=max(1000, top_k))
+            nxt = sample_from_ntd(r0.get("result_by_token_id", {}), temperature=temperature, top_k=top_k)
         if nxt is None:
             nxt = 128
         seq.append(nxt)
@@ -121,25 +127,31 @@ def main():
     ap.add_argument("--temperature", type=float, default=0.9)
     ap.add_argument("--top-k", type=int, default=20)
     ap.add_argument("--max-context", type=int, default=32)
-    ap.add_argument("--group-size", type=int, default=10)
-    ap.add_argument("--fanout-threads", type=int, default=0)
-    ap.add_argument("--threads-per-engine", type=int, default=1)
+    # group-size/fanout threads were used by the Python fanout engine.
+    # Generation now uses a single GramEngine over all shards.
+    ap.add_argument("--threads", type=int, default=32, help="Threads used by Fastgram C++ engine")
     args = ap.parse_args()
 
     cfg = json.loads(Path(args.config).read_text())
     tpi = int(cfg["tokens_per_image"])
     assert tpi == 65472, f"Expected 65472 tokens/image, got {tpi}"
 
-    # multishard_engine.py lives next to this script on the server/checkout.
-    from multishard_engine import MultiShardGramEngine
+    # For generation, using a single GramEngine over all shard dirs is much faster
+    # than Python-level fanout.
+    from fastgram import GramEngine
+    import glob
 
-    engine = MultiShardGramEngine(
-        index_root=args.index_root,
+    shard_dirs = sorted(glob.glob(str(Path(args.index_root) / "[0-9][0-9][0-9][0-9][0-9]")))
+    if not shard_dirs:
+        raise SystemExit(f"No shard dirs found under {args.index_root}")
+
+    engine = GramEngine(
+        index_dir=shard_dirs,
         eos_token_id=int(cfg.get("separator_token", 65535)),
         vocab_size=int(cfg.get("vocab_size", 256)),
-        group_size=args.group_size,
-        fanout_threads=(args.fanout_threads if args.fanout_threads > 0 else None),
-        threads_per_engine=args.threads_per_engine,
+        version=4,
+        token_dtype="u16",
+        threads=max(1, args.threads),
         max_support=max(1000, args.top_k),
     )
 

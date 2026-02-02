@@ -2,6 +2,7 @@
 set -euo pipefail
 
 PY=/root/imagegram/dct_tokenizer/scripts/cc12m/cc12m_generate_5lvl.py
+# Note: cc12m_generate_5lvl.py now uses Fastgram's built-in multi-shard engine (much faster).
 IDX=/root/cc12m_indices_5lvl
 CFG=/root/cc12m_tokens_5lvl/config.json
 BASE_OUT=/workspace/cc12m/gen/5lvl_grid_fast

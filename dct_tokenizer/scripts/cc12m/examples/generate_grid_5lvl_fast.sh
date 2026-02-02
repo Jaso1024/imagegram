@@ -22,7 +22,8 @@ run_one() {
   python3 "$PY" --index-root "$IDX" --config "$CFG" --out-dir "$out" "$@"
 }
 
-COMMON=(--group-size 20 --threads-per-engine 1)
+# Use C++ engine threads
+COMMON=(--threads 32)
 
 # 1 image per setting to keep runtime manageable
 run_one t065_k5_ctx64    --num-images 1 --temperature 0.65 --top-k 5  --max-context 64  "${COMMON[@]}"
